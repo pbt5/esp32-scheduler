@@ -112,7 +112,7 @@ void setup() {
   tft.setCursor(60, 40);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setTextSize(3);
-  tft.println("Smart Pillbox");
+  tft.println("💊 Smart Pillbox 🏥");
 
   tft.setCursor(80, 100);
   tft.setTextSize(2);
@@ -188,7 +188,7 @@ void loop() {
   delay(100);  // Small delay to prevent overwhelming the system
 }
 
-/* 
+/*
 Example input:
 {
   "1": {
@@ -370,7 +370,7 @@ void setSchedule(const String& jsonInput) {
     // Serial.print("  Note: "); Serial.println(schedules[scheduleCount].note);
     // Serial.print("  Duration: "); Serial.println(schedules[scheduleCount].duration);
 
-    scheduleCount++;    
+    scheduleCount++;
   }
 }
 
