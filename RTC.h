@@ -6,5 +6,6 @@
 
 void rtcBegin();
 String rtcGetTime();
+bool rtcSetTime(const String& datetime);
 
 #endif
