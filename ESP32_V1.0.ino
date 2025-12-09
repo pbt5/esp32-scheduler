@@ -21,14 +21,16 @@
 #define HC165_CLOCK_PIN 32   // CLK (Shift Clock)
 #define HC165_DATA_PIN 34    // Q̅H (Serial Data Output, input-only GPIO)
 
+// ESP32-CAM communication removed - now uses WiFi direct connection
+
 // Define LED_BUILTIN if not already defined (some ESP32 boards don't have it)
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 5     // GPIO5 (changed from GPIO2 to avoid conflict with LCD RST)
 #endif
 
 // WiFi credentials - CHANGE THESE TO YOUR NETWORK
-const char* ssid = "Verizon_3LG67L";          // Replace with your WiFi name
-const char* password = "fluke4-rift-aha";   // Replace with your WiFi password
+const char* ssid = "12345";          // Replace with your WiFi name
+const char* password = "12345";   // Replace with your WiFi password
 
 // TCP server configuration (must match Python system_config.json)
 const int serverPort = 8080;
@@ -48,6 +50,8 @@ byte lastBoxStates = 0x7F;   // Initial: all closed (0b01111111)
 byte currentBoxStates = 0x7F;
 unsigned long lastDebounceTime[7] = {0}; // Debounce timestamp for each box
 const unsigned long debounceDelay = 50;  // 50ms software debounce
+
+// ESP32-CAM now connects directly to host via WiFi (no UART needed)
 
 // LCD Display object
 TFT_eSPI tft = TFT_eSPI();
@@ -112,7 +116,7 @@ void setup() {
   tft.setCursor(60, 40);
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.setTextSize(3);
-  tft.println("💊 Smart Pillbox 🏥");
+  tft.println("Smart Pillbox");
 
   tft.setCursor(80, 100);
   tft.setTextSize(2);
@@ -120,6 +124,9 @@ void setup() {
   tft.println("Initializing...");
 
   Serial.println("LCD display initialized");
+
+  // ESP32-CAM now connects directly to host via WiFi
+  Serial.println("ESP32-CAM uses WiFi direct connection (no UART)");
 
   // Setup I2C
   Wire.begin(SDA_PIN, SCL_PIN);
@@ -188,7 +195,7 @@ void loop() {
   delay(100);  // Small delay to prevent overwhelming the system
 }
 
-/*
+/* 
 Example input:
 {
   "1": {
@@ -370,7 +377,7 @@ void setSchedule(const String& jsonInput) {
     // Serial.print("  Note: "); Serial.println(schedules[scheduleCount].note);
     // Serial.print("  Duration: "); Serial.println(schedules[scheduleCount].duration);
 
-    scheduleCount++;
+    scheduleCount++;    
   }
 }
 
@@ -471,25 +478,31 @@ void detectOpenClose() {
   for (int boxNum = 1; boxNum <= 7; boxNum++) {
     int bitIndex = boxNum - 1;  // Bit 0 = Box 1, Bit 6 = Box 7
 
-    // Extract current and last state for this box
+    // Extract current reading and stable (confirmed) state for this box
     bool currentClosed = (currentBoxStates >> bitIndex) & 0x01;  // Bit=1: CLOSED
-    bool lastClosed = (lastBoxStates >> bitIndex) & 0x01;
+    bool stableClosed = (lastBoxStates >> bitIndex) & 0x01;      // Last confirmed state
 
-    // Detect state change
-    if (currentClosed != lastClosed) {
-      lastDebounceTime[bitIndex] = millis();
-    }
+    // If current reading differs from stable state, start/continue debounce
+    if (currentClosed != stableClosed) {
+      // Check if this is a new change or continuing change
+      if (lastDebounceTime[bitIndex] == 0) {
+        // New change detected, start debounce timer
+        lastDebounceTime[bitIndex] = millis();
+      }
 
-    // Software debounce: wait 50ms after state change
-    if ((millis() - lastDebounceTime[bitIndex]) > debounceDelay) {
-      // State has been stable for debounceDelay
-      if (currentClosed != lastClosed) {
-        // Update last state
+      // Check if debounce time has passed
+      if ((millis() - lastDebounceTime[bitIndex]) > debounceDelay) {
+        // State has been stable for debounceDelay, confirm the change
+
+        // Update stable state
         if (currentClosed) {
           lastBoxStates |= (1 << bitIndex);   // Set bit (CLOSED)
         } else {
           lastBoxStates &= ~(1 << bitIndex);  // Clear bit (OPEN)
         }
+
+        // Reset debounce timer
+        lastDebounceTime[bitIndex] = 0;
 
         // Handle state change event
         if (!currentClosed) {
@@ -498,6 +511,8 @@ void detectOpenClose() {
           Serial.print(boxNum);
           Serial.println(" opened");
           sendBoxEvent(boxNum, true);  // true = opened
+
+          // ESP32-CAM photo is now triggered by host via WiFi direct connection
 
           // Turn off LED if medication is active for this box
           for (int i = 0; i < medicationCount; i++) {
@@ -524,6 +539,9 @@ void detectOpenClose() {
           sendBoxEvent(boxNum, false);  // false = closed
         }
       }
+    } else {
+      // Current matches stable state, reset debounce timer
+      lastDebounceTime[bitIndex] = 0;
     }
   }
 }
@@ -573,10 +591,56 @@ void connectToWiFi() {
     Serial.println("\nWiFi connected!");
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
+
+    // Display IP address on LCD for 3 seconds
+    displayIPAddress(WiFi.localIP().toString());
   } else {
     Serial.println("\nWiFi connection failed!");
     Serial.println("System will continue with local mode only.");
+
+    // Display WiFi failed message on LCD
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(20, 50);
+    tft.println("WiFi Failed!");
+    tft.setCursor(20, 80);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.println("Local mode only");
+    delay(2000);
   }
+}
+
+// Display IP address on LCD screen
+void displayIPAddress(String ip) {
+  tft.fillScreen(TFT_BLACK);
+
+  // Title
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(40, 20);
+  tft.println("WiFi Connected!");
+
+  // IP Address label
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setCursor(20, 60);
+  tft.println("IP Address:");
+
+  // IP Address value (larger font)
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.setTextSize(3);
+  tft.setCursor(20, 90);
+  tft.println(ip);
+
+  // Port info
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(20, 130);
+  tft.print("Port: ");
+  tft.println(serverPort);
+
+  // Wait 3 seconds
+  delay(3000);
 }
 
 void handleTCPClient() {
@@ -1254,10 +1318,25 @@ void displayBoxStatus() {
 
 // Update box status display (only redraw if state changed)
 void updateBoxStatusDisplay() {
+  // === DEBUG: Print state comparison ===
+  static unsigned long lastDebugPrint = 0;
+  if (millis() - lastDebugPrint > 2000) {  // Every 2 seconds
+    Serial.print("[LCD_DEBUG] updateBoxStatusDisplay: currentDisplay=");
+    Serial.print(currentDisplay);
+    Serial.print(" (3=BOX_STATUS), current=0b");
+    Serial.print(currentBoxStates, BIN);
+    Serial.print(", last=0b");
+    Serial.print(lastDisplayedBoxStates, BIN);
+    Serial.print(", changed=");
+    Serial.println(currentBoxStates != lastDisplayedBoxStates ? "YES" : "NO");
+    lastDebugPrint = millis();
+  }
+
   // Redraw entire screen if box states or medication count changed
   if (currentDisplay == DISPLAY_BOX_STATUS &&
       (currentBoxStates != lastDisplayedBoxStates ||
        medicationCount != lastDisplayedMedicationCount)) {
+    Serial.println("[LCD_DEBUG] *** State changed! Calling displayBoxStatus() ***");
     displayBoxStatus();
     return;
   }
@@ -1310,3 +1389,8 @@ void updateLCDStatus() {
     }
   }
 }
+
+// ==================== ESP32-CAM Communication ====================
+// ESP32-CAM now connects directly to host via WiFi
+// Photo capture is triggered by host when box_event is received
+// No UART communication functions needed here
